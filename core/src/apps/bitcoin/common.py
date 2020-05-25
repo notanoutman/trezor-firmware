@@ -5,7 +5,8 @@ from trezor.crypto import bech32, bip32, der
 from trezor.crypto.curve import secp256k1
 from trezor.utils import ensure
 
-from apps.common.coininfo import CoinInfo
+if False:
+    from apps.common.coininfo import CoinInfo
 
 # supported witness version for bech32 addresses
 _BECH32_WITVER = const(0x00)
@@ -15,6 +16,18 @@ def ecdsa_sign(node: bip32.HDNode, digest: bytes) -> bytes:
     sig = secp256k1.sign(node.private_key(), digest)
     sigder = der.encode_seq((sig[1:33], sig[33:65]))
     return sigder
+
+
+def ecdsa_verify(public_key: bytes, der_signature: bytes, digest: bytes) -> bool:
+    seq = der.decode_seq(der_signature)
+    if len(seq) != 2 or any(len(i) > 32 for i in seq):
+        raise ValueError
+
+    signature = bytearray(64)
+    signature[32 - len(seq[0]) : 32] = seq[0]
+    signature[64 - len(seq[1]) : 64] = seq[1]
+
+    return secp256k1.verify(public_key, signature, digest)
 
 
 def ecdsa_hash_pubkey(pubkey: bytes, coin: CoinInfo) -> bytes:
