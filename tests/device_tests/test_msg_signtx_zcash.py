@@ -177,3 +177,75 @@ class TestMsgSigntxZcash:
                     details=details,
                     prev_txes=TX_API,
                 )
+
+    @pytest.mark.skip_t1
+    def test_external_presigned(self, client):
+        inp1 = proto.TxInputType(
+            # tmQoJ3PTXgQLaRRZZYT6xk8XtjRbr2kCqwu
+            address_n=parse_path("m/44h/1h/0h/0/0"),
+            amount=300000000,
+            prev_hash=TXHASH_e38206,
+            prev_index=0,
+        )
+
+        inp2 = proto.TxInputType(
+            # tmQoJ3PTXgQLaRRZZYT6xk8XtjRbr2kCqwu
+            # address_n=parse_path("m/44h/1h/0h/0/0"),
+            amount=300000000,
+            prev_hash=TXHASH_aaf51e,
+            prev_index=1,
+            script_type=proto.InputScriptType.EXTERNAL,
+            script_sig=bytes.fromhex(
+                "47304402202495a38e5b368569a1a0c9fc95aa7e57a0dd5ae43f51300d7222dc139015233d022047833eaa571578f72c8468c8b537b36410388b7eb5001d75d1f4b954e1997d590121030e669acac1f280d1ddf441cd2ba5e97417bf2689e4bbec86df4f831bf9f7ffd0"
+            ),
+        )
+
+        out1 = proto.TxOutputType(
+            address="tmJ1xYxP8XNTtCoDgvdmQPSrxh5qZJgy65Z",
+            amount=300000000 + 300000000 - 1940,
+            script_type=proto.OutputScriptType.PAYTOADDRESS,
+        )
+
+        with client:
+            client.set_expected_responses(
+                [
+                    request_input(0),
+                    request_meta(TXHASH_e38206),
+                    request_input(0, TXHASH_e38206),
+                    request_input(1, TXHASH_e38206),
+                    request_output(0, TXHASH_e38206),
+                    request_output(1, TXHASH_e38206),
+                    request_extra_data(0, 1, TXHASH_e38206),
+                    request_input(1),
+                    request_output(0),
+                    proto.ButtonRequest(code=B.ConfirmOutput),
+                    proto.ButtonRequest(code=B.SignTx),
+                    request_input(1),
+                    request_meta(TXHASH_aaf51e),
+                    request_input(0, TXHASH_aaf51e),
+                    request_output(0, TXHASH_aaf51e),
+                    request_output(1, TXHASH_aaf51e),
+                    request_extra_data(0, 1, TXHASH_aaf51e),
+                    request_input(0),
+                    request_input(1),
+                    request_output(0),
+                    request_finished(),
+                ]
+            )
+
+            details = proto.SignTx(
+                version=4, version_group_id=0x892F2085, branch_id=0x76B809BB,
+            )
+            _, serialized_tx = btc.sign_tx(
+                client,
+                "Zcash Testnet",
+                [inp1, inp2],
+                [out1],
+                details=details,
+                prev_txes=TX_API,
+            )
+
+        assert (
+            serialized_tx.hex()
+            == "0400008085202f890268039326c180fa7b1e999392e25a3ec6a8aec83c11b787ddb1746922020682e3000000006a473044022007efbf539f8d612d8e140c6af2289b447c34e3d36edd75d539f269fe5526878302206830f6b0398494bca09afdd967fedcd016f49468711cfcd7aafd9a128ee568d20121030e669acac1f280d1ddf441cd2ba5e97417bf2689e4bbec86df4f831bf9f7ffd0ffffffffdc754d63eff4698ee321476872519c53f14cfe58c9425c7ee464c206461ef5aa010000006a47304402202495a38e5b368569a1a0c9fc95aa7e57a0dd5ae43f51300d7222dc139015233d022047833eaa571578f72c8468c8b537b36410388b7eb5001d75d1f4b954e1997d590121030e669acac1f280d1ddf441cd2ba5e97417bf2689e4bbec86df4f831bf9f7ffd0ffffffff016c3ec323000000001976a9145b157a678a10021243307e4bb58f36375aa80e1088ac00000000000000000000000000000000000000"
+        )
