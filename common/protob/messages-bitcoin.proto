@@ -284,7 +284,7 @@ message GetOwnershipProof {
     optional string coin_name = 2 [default='Bitcoin'];                  // coin to use
     optional InputScriptType script_type = 3 [default=SPENDWITNESS];    // used to distinguish between various scriptPubKey types
     optional MultisigRedeemScriptType multisig = 4;                     // filled if proof is for a multisig address
-    optional bool user_confirmation = 5;                                // optionally request user confirmation before sending the result
+    optional bool user_confirmation = 5;                                // show a confirmation dialog and set the "user confirmation" bit in the proof
     repeated bytes ownership_ids = 6;                                   // list of ownership identifiers in case of multisig
     optional bytes commitment_data = 7;                                 // additional data to which the proof should commit
 }
