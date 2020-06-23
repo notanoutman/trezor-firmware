@@ -3,6 +3,7 @@ from trezor.messages.GetOwnershipId import GetOwnershipId
 from trezor.messages.OwnershipId import OwnershipId
 
 from apps.common import coininfo
+from apps.common.paths import validate_path
 
 from . import addresses, common, scripts
 from .keychain import with_keychain
@@ -15,7 +16,17 @@ if False:
 @with_keychain
 async def get_ownership_id(
     ctx, msg: GetOwnershipId, keychain: Keychain, coin: coininfo.CoinInfo
-):
+) -> OwnershipId:
+    await validate_path(
+        ctx,
+        addresses.validate_full_path,
+        keychain,
+        msg.address_n,
+        coin.curve_name,
+        coin=coin,
+        script_type=msg.script_type,
+    )
+
     if msg.script_type not in common.INTERNAL_INPUT_SCRIPT_TYPES:
         raise wire.DataError("Invalid script type")
 
@@ -27,4 +38,4 @@ async def get_ownership_id(
     script_pubkey = scripts.output_derive_script(address, coin)
     ownership_id = get_identifier(script_pubkey, keychain)
 
-    return OwnershipId(ownership_id)
+    return OwnershipId(ownership_id=ownership_id)
