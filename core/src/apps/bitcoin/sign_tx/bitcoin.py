@@ -185,7 +185,7 @@ class Bitcoin:
                     script_pubkey, txi.script_sig, txi.witness, self.coin
                 )
 
-                if not verifier.check_sighhash_type(self.get_hash_type() & 0xFF):
+                if not verifier.check_hash_type(self.get_hash_type()):
                     raise wire.DataError("Unsupported sighash type")
 
                 tx_digest = await self.get_tx_digest(
@@ -413,7 +413,7 @@ class Bitcoin:
             self.write_tx_output(h_sign, txo, script_pubkey)
 
         writers.write_uint32(h_sign, self.tx.lock_time)
-        writers.write_uint32(h_sign, self.get_hash_type())
+        writers.write_uint32(h_sign, self.get_sighash_type())
 
         # check that the inputs were the same as those streamed for confirmation
         if self.h_confirmed.get_digest() != h_check.get_digest():
@@ -493,8 +493,15 @@ class Bitcoin:
     # Tx Helpers
     # ===
 
-    def get_hash_type(self) -> int:
+    def get_sighash_type(self) -> int:
         return SIGHASH_ALL
+
+    def get_hash_type(self) -> int:
+        """ Return the nHashType flags."""
+        # The nHashType is the 8 least significant bits of the sighash type.
+        # Some coins set the 24 most significant bits of the sighash type to
+        # the fork ID value.
+        return self.get_sighash_type() & 0xFF
 
     def write_tx_input(
         self, w: writers.Writer, txi: TxInputType, script: bytes
@@ -650,7 +657,7 @@ class Bitcoin:
         writers.write_uint32(h_preimage, self.tx.lock_time)
 
         # nHashType
-        writers.write_uint32(h_preimage, self.get_hash_type())
+        writers.write_uint32(h_preimage, self.get_sighash_type())
 
         return writers.get_tx_hash(h_preimage, double=self.coin.sign_hash_double)
 

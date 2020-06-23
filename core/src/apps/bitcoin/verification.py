@@ -74,9 +74,9 @@ class SignatureVerifier:
 
         raise wire.DataError("Unsupported signature script")
 
-    def check_sighhash_type(self, sighash_type: int) -> bool:
+    def check_hash_type(self, hash_type: int) -> bool:
         for signature in self.signatures:
-            if signature[1] != sighash_type:
+            if signature[1] != hash_type:
                 return False
         return True
 
