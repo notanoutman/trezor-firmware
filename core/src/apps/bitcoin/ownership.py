@@ -25,6 +25,7 @@ if False:
 _VERSION_MAGIC = b"SL\x00\x19"
 _FLAG_USER_CONFIRMED = 0x01
 _OWNERSHIP_ID_LEN = 32
+_OWNERSHIP_ID_KEY_PATH = [b"SLIP-0019", b"Ownership identification key"]
 
 
 def generate_proof(
@@ -130,7 +131,7 @@ def verify_proof_signature(
 
 def get_identifier(script_pubkey: bytes, keychain: seed.Keychain):
     # k = Key(m/"SLIP-0019"/"Ownership identification key")
-    node = keychain.derive([b"SLIP-0019", b"Ownership identification key"])
+    node = keychain.derive(_OWNERSHIP_ID_KEY_PATH)
 
     # id = HMAC-SHA256(key = k, msg = scriptPubKey)
     return hmac.Hmac(node.key(), script_pubkey, hashlib.sha256).digest()

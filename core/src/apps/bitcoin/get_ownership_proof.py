@@ -7,6 +7,7 @@ from trezor.ui.text import Text
 
 from apps.common import coininfo
 from apps.common.confirm import require_confirm
+from apps.common.paths import validate_path
 
 from . import addresses, common, scripts
 from .keychain import with_keychain
@@ -22,7 +23,17 @@ _MAX_MONO_LINE = 18
 @with_keychain
 async def get_ownership_proof(
     ctx, msg: GetOwnershipProof, keychain: Keychain, coin: coininfo.CoinInfo
-):
+) -> OwnershipProof:
+    await validate_path(
+        ctx,
+        addresses.validate_full_path,
+        keychain,
+        msg.address_n,
+        coin.curve_name,
+        coin=coin,
+        script_type=msg.script_type,
+    )
+
     if msg.script_type not in common.INTERNAL_INPUT_SCRIPT_TYPES:
         raise wire.DataError("Invalid script type")
 
@@ -45,6 +56,7 @@ async def get_ownership_proof(
     else:
         msg.ownership_ids = [ownership_id]
 
+    # In order to set the "user confirmation" bit in the proof, the user must actually confirm.
     if msg.user_confirmation:
         text = Text("Proof of ownership", ui.ICON_CONFIG)
         text.normal("Do you want to create a")
@@ -77,4 +89,4 @@ async def get_ownership_proof(
         msg.commitment_data,
     )
 
-    return OwnershipProof(ownership_proof, signature)
+    return OwnershipProof(ownership_proof=ownership_proof, signature=signature)
