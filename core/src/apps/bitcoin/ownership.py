@@ -1,9 +1,10 @@
-from trezor import wire
+from trezor import utils, wire
 from trezor.crypto import bip32, hashlib, hmac
 
 from apps.bitcoin.multisig import multisig_pubkey_index
 from apps.bitcoin.writers import write_bytes_prefixed
 from apps.common import seed
+from apps.common.readers import BytearrayReader, read_bitcoin_varint
 from apps.common.writers import (
     empty_bytearray,
     write_bitcoin_varint,
@@ -12,6 +13,7 @@ from apps.common.writers import (
 )
 
 from . import common, scripts
+from .readers import read_bytes_prefixed
 from .verification import SignatureVerifier
 
 if False:
@@ -85,48 +87,36 @@ def verify_nonownership(
     keychain: seed.Keychain,
     coin: CoinInfo,
 ) -> bool:
-    if not proof[:4] == _VERSION_MAGIC:
-        raise wire.DataError("Unknown format of proof of ownership")
+    try:
+        r = BytearrayReader(proof)
+        if r.read(4) != _VERSION_MAGIC:
+            raise wire.DataError("Unknown format of proof of ownership")
 
-    flags = proof[4]
-    if flags & 0b1111_1110:
-        raise wire.DataError("Unknown flags in proof of ownership")
+        flags = r.get()
+        if flags & 0b1111_1110:
+            raise wire.DataError("Unknown flags in proof of ownership")
 
-    # Extract signature and witness data from the proof.
-    id_count, id_offset = scripts.read_bitcoin_varint(proof, 5)
-    sig_offset = id_offset + id_count * _OWNERSHIP_ID_LEN
-    script_sig_len, script_sig_offset = scripts.read_bitcoin_varint(proof, sig_offset)
-    proof_body = proof[:sig_offset]
-    script_sig = proof[script_sig_offset : script_sig_offset + script_sig_len]
-    witness = proof[script_sig_offset + script_sig_len :]
+        # Determine whether our ownership ID appears in the proof.
+        id_count = read_bitcoin_varint(r)
+        ownership_id = get_identifier(script_pubkey, keychain)
+        not_owned = True
+        for _ in range(id_count):
+            if utils.consteq(ownership_id, r.read(_OWNERSHIP_ID_LEN)):
+                not_owned = False
 
-    verify_proof_signature(
-        proof_body, script_pubkey, commitment_data, script_sig, witness, coin
-    )
+        proof_body = proof[: r.offset]
+        script_sig = read_bytes_prefixed(r)
+        witness = r.read()
 
-    # Determine whether our ownership ID appears in the proof.
-    ownership_id = get_identifier(script_pubkey, keychain)
-    for _ in range(id_count):
-        if proof[id_offset : id_offset + _OWNERSHIP_ID_LEN] == ownership_id:
-            return False
-        id_offset += _OWNERSHIP_ID_LEN
-    return True
+        sighash = hashlib.sha256(proof_body)
+        sighash.update(script_pubkey)
+        sighash.update(commitment_data)
+        verifier = SignatureVerifier(script_pubkey, script_sig, witness, coin)
+        verifier.verify(sighash.digest())
+    except (ValueError, IndexError):
+        raise wire.DataError("Invalid proof of ownership")
 
-
-def verify_proof_signature(
-    proof_body: bytes,
-    script_pubkey: bytes,
-    commitment_data: bytes,
-    script_sig: bytes,
-    witness: bytes,
-    coin: CoinInfo,
-) -> None:
-    sighash = hashlib.sha256(proof_body)
-    sighash.update(script_pubkey)
-    sighash.update(commitment_data)
-
-    verifier = SignatureVerifier(script_pubkey, script_sig, witness, coin)
-    verifier.verify(sighash.digest())
+    return not_owned
 
 
 def get_identifier(script_pubkey: bytes, keychain: seed.Keychain):
