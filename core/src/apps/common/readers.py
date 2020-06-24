@@ -12,6 +12,9 @@ class BytearrayReader:
         self.offset += 1
         return ret
 
+    def peek(self) -> int:
+        return self.data[self.offset]
+
     def read(self, i: Optional[int] = None) -> bytes:
         if i is None:
             ret = self.data[self.offset :]
