@@ -6,12 +6,11 @@ from trezor.crypto.curve import secp256k1
 from trezor.messages import InputScriptType, OutputScriptType
 from trezor.utils import ensure
 
-from apps.common.coininfo import CoinInfo
-
 if False:
     from typing import Dict
     from trezor.messages.TxInputType import EnumTypeInputScriptType
     from trezor.messages.TxOutputType import EnumTypeOutputScriptType
+    from apps.common.coininfo import CoinInfo
 
 # Default signature hash type in Bitcoin which signs all inputs and all outputs of the transaction.
 SIGHASH_ALL = const(0x01)
@@ -57,8 +56,8 @@ def ecdsa_sign(node: bip32.HDNode, digest: bytes) -> bytes:
 
 
 def ecdsa_verify(public_key: bytes, der_signature: bytes, digest: bytes) -> bool:
-    seq, offset = der.decode_seq(der_signature, 0)
-    if offset != len(der_signature) or len(seq) != 2:
+    seq = der.decode_seq(der_signature)
+    if len(seq) != 2 or any(len(i) > 32 for i in seq):
         raise ValueError
 
     signature = bytearray(64)

@@ -1,5 +1,7 @@
+from apps.common.readers import BytearrayReader
+
 if False:
-    from typing import List, Tuple
+    from typing import List
 
 
 def encode_length(l: int) -> bytes:
@@ -13,40 +15,57 @@ def encode_length(l: int) -> bytes:
         raise ValueError
 
 
-def decode_length(data: bytes, offset: int) -> Tuple[int, int]:
-    init = data[offset]
-    offset += 1
+def decode_length(r: BytearrayReader) -> int:
+    init = r.get()
     if init < 0x80:
         # short form encodes length in initial octet
-        return init, offset
+        return init
+
+    if init == 0x80 or init == 0xFF or r.peek() == 0x00:
+        raise ValueError  # indefinite length, RFU or not shortest possible
 
     # long form
     n = 0
     for _ in range(init & 0x7F):
-        n = n * 0x100 + data[offset]
-        offset += 1
+        n = n * 0x100 + r.get()
 
-    return n, offset
+    if n < 128:
+        raise ValueError  # encoding is not the shortest possible
+
+    return n
 
 
 def encode_int(i: bytes) -> bytes:
     i = i.lstrip(b"\x00")
+    if not i:
+        i = b"\00"
+
     if i[0] >= 0x80:
         i = b"\x00" + i
     return b"\x02" + encode_length(len(i)) + i
 
 
-def decode_int(data: bytes, offset: int) -> Tuple[bytes, int]:
-    if data[offset] != 0x02:
+def decode_int(r: BytearrayReader) -> bytes:
+    if r.get() != 0x02:
         raise ValueError
-    n, offset = decode_length(data, offset + 1)
 
-    # find first non-null octet
-    for i in range(offset, offset + n):
-        if data[i]:
-            break
+    n = decode_length(r)
+    if n == 0:
+        raise ValueError
 
-    return data[i : offset + n], offset + n
+    if r.peek() & 0x80:
+        raise ValueError  # negative integer
+
+    if r.peek() == 0x00 and n > 1:
+        r.get()
+        n -= 1
+        if r.peek() & 0x80 == 0x00:
+            raise ValueError  # excessive zero-padding
+
+        if r.peek() == 0x00:
+            raise ValueError  # excessive zero-padding
+
+    return r.read(n)
 
 
 def encode_seq(seq: tuple) -> bytes:
@@ -56,18 +75,20 @@ def encode_seq(seq: tuple) -> bytes:
     return b"\x30" + encode_length(len(res)) + res
 
 
-def decode_seq(data: bytes, offset: int) -> Tuple[List[bytes], int]:
-    if data[offset] != 0x30:
+def decode_seq(data: bytes) -> List[bytes]:
+    r = BytearrayReader(data)
+
+    if r.get() != 0x30:
         raise ValueError
-    n, offset = decode_length(data, offset + 1)
+    n = decode_length(r)
 
     seq = []
-    end = offset + n
-    while offset < end:
-        i, offset = decode_int(data, offset)
+    end = r.offset + n
+    while r.offset < end:
+        i = decode_int(r)
         seq.append(i)
 
-    if offset != end:
+    if r.offset != end or r.remaining_count():
         raise ValueError
 
-    return seq, offset
+    return seq
