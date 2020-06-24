@@ -7,6 +7,7 @@ from trezor.messages.TxInputType import TxInputType
 
 from apps.common import address_type
 from apps.common.coininfo import CoinInfo
+from apps.common.readers import BytearrayReader, read_bitcoin_varint
 from apps.common.writers import empty_bytearray, write_bitcoin_varint
 
 from . import common
@@ -15,6 +16,7 @@ from .multisig import (
     multisig_get_pubkeys,
     multisig_pubkey_index,
 )
+from .readers import read_bytes_prefixed, read_op_push
 from .writers import (
     write_bytes_fixed,
     write_bytes_prefixed,
@@ -143,20 +145,21 @@ def input_script_p2pkh_or_p2sh(
     return w
 
 
-def read_input_script_p2pkh(
-    script_sig: bytes,
-) -> Tuple[List[bytes], List[Tuple[bytes, int]]]:
-    n, offset = read_op_push(script_sig, 0)
-    signature = script_sig[offset : offset + n - 1]
-    sighash_type = script_sig[offset + n - 1]
-    offset += n
+def parse_input_script_p2pkh(script_sig: bytes,) -> Tuple[bytes, bytes, int]:
+    try:
+        r = BytearrayReader(script_sig)
+        n = read_op_push(r)
+        signature = r.read(n - 1)
+        sighash_type = r.get()
 
-    n, offset = read_op_push(script_sig, offset)
-    if offset + n != len(script_sig):
-        raise wire.DataError("Invalid scriptSig.")
-    pubkey = script_sig[offset : offset + n]
+        n = read_op_push(r)
+        pubkey = r.read()
+        if len(pubkey) != n:
+            raise ValueError
+    except (ValueError, IndexError):
+        wire.DataError("Invalid scriptSig.")
 
-    return [pubkey], [(signature, sighash_type)]
+    return pubkey, signature, sighash_type
 
 
 def output_script_p2pkh(pubkeyhash: bytes) -> bytearray:
@@ -269,22 +272,25 @@ def witness_p2wpkh(signature: bytes, pubkey: bytes, hash_type: int) -> bytearray
     return w
 
 
-def read_witness_p2wpkh(witness: bytes) -> Tuple[List[bytes], List[Tuple[bytes, int]]]:
-    if witness[0] != 2:
-        # num of stack items, in P2WPKH it's always 2
+def parse_witness_p2wpkh(witness: bytes) -> Tuple[bytes, bytes, int]:
+    try:
+        r = BytearrayReader(witness)
+
+        if r.get() != 2:
+            # num of stack items, in P2WPKH it's always 2
+            raise ValueError
+
+        n = read_bitcoin_varint(r)
+        signature = r.read(n - 1)
+        sighash_type = r.get()
+
+        pubkey = read_bytes_prefixed(r)
+        if r.remaining_count():
+            raise ValueError
+    except (ValueError, IndexError):
         raise wire.DataError("Invalid witness.")
 
-    n, offset = read_bitcoin_varint(witness, 1)
-    signature = witness[offset : offset + n - 1]
-    sighash_type = witness[offset + n - 1]
-    offset += n
-
-    n, offset = read_bitcoin_varint(witness, offset)
-    if offset + n != len(witness):
-        raise wire.DataError("Invalid witness.")
-    pubkey = witness[offset : offset + n]
-
-    return [pubkey], [(signature, sighash_type)]
+    return pubkey, signature, sighash_type
 
 
 def witness_p2wsh(
@@ -336,27 +342,29 @@ def witness_p2wsh(
     return w
 
 
-def read_witness_p2wsh(witness: bytes) -> Tuple[bytes, List[Tuple[bytes, int]]]:
-    # Get number of witness stack items.
-    item_count, offset = read_bitcoin_varint(witness, 0)
+def parse_witness_p2wsh(witness: bytes) -> Tuple[bytes, List[Tuple[bytes, int]]]:
+    try:
+        r = BytearrayReader(witness)
 
-    # Skip over OP_FALSE, which is due to the old OP_CHECKMULTISIG bug.
-    if witness[offset] != 0:
+        # Get number of witness stack items.
+        item_count = read_bitcoin_varint(r)
+
+        # Skip over OP_FALSE, which is due to the old OP_CHECKMULTISIG bug.
+        if r.get() != 0:
+            raise ValueError
+
+        signatures = []
+        for i in range(item_count - 2):
+            n = read_bitcoin_varint(r)
+            signature = r.read(n - 1)
+            sighash_type = r.get()
+            signatures.append((signature, sighash_type))
+
+        script = read_bytes_prefixed(r)
+        if r.remaining_count():
+            raise ValueError
+    except (ValueError, IndexError):
         raise wire.DataError("Invalid witness.")
-    offset += 1
-
-    signatures = []
-    for i in range(item_count - 2):
-        n, offset = read_bitcoin_varint(witness, offset)
-        signature = witness[offset : offset + n - 1]
-        sighash_type = witness[offset + n - 1]
-        signatures.append((signature, sighash_type))
-        offset += n
-
-    n, offset = read_bitcoin_varint(witness, offset)
-    if offset + n != len(witness):
-        raise wire.DataError("Invalid witness.")
-    script = witness[offset : offset + n]
 
     return script, signatures
 
@@ -410,30 +418,29 @@ def input_script_multisig(
     return w
 
 
-def read_input_script_multisig(
+def parse_input_script_multisig(
     script_sig: bytes,
 ) -> Tuple[bytes, List[Tuple[bytes, int]]]:
-    offset = 0
+    try:
+        r = BytearrayReader(script_sig)
 
-    # Skip over OP_FALSE, which is due to the old OP_CHECKMULTISIG bug.
-    if script_sig[offset] != 0:
-        raise wire.DataError("Invalid witness.")
-    offset += 1
+        # Skip over OP_FALSE, which is due to the old OP_CHECKMULTISIG bug.
+        if r.get() != 0:
+            raise ValueError
 
-    signatures = []
-    while True:
-        n, offset = read_op_push(script_sig, offset)
-        if offset + n >= len(script_sig):
-            break
-        signature = script_sig[offset : offset + n - 1]
-        sighash_type = script_sig[offset + n - 1]
-        signatures.append((signature, sighash_type))
-        offset += n
+        signatures = []
+        n = read_op_push(r)
+        while r.remaining_count() > n:
+            signature = r.read(n - 1)
+            sighash_type = r.get()
+            signatures.append((signature, sighash_type))
+            n = read_op_push(r)
 
-    if offset + n != len(script_sig):
+        script = r.read()
+        if len(script) != n:
+            raise ValueError
+    except (ValueError, IndexError):
         raise wire.DataError("Invalid scriptSig.")
-
-    script = script_sig[offset : offset + n]
 
     return script, signatures
 
@@ -463,28 +470,34 @@ def output_script_multisig_length(pubkeys: List[bytes], m: int) -> int:
     return 1 + len(pubkeys) * (1 + 33) + 1 + 1  # see output_script_multisig
 
 
-def read_output_script_multisig(script: bytes) -> Tuple[List[bytes], int]:
-    if script[-1] != 0xAE:  # OP_CHECKMULTISIG
-        raise wire.DataError("Invalid multisig script")
+def parse_output_script_multisig(script: bytes) -> Tuple[List[bytes], int]:
+    try:
+        r = BytearrayReader(script)
 
-    if not 0x51 <= script[0] < 0x60 or not 0x51 <= script[-2] < 0x60:
-        raise wire.DataError("Invalid multisig script")
+        threshold = r.get() - 0x50
+        pubkey_count = script[-2] - 0x50
 
-    threshold = script[0] - 0x50
-    pubkey_count = script[-2] - 0x50
-    if threshold > pubkey_count:
-        raise wire.DataError("Invalid multisig script")
+        if (
+            not 1 <= threshold <= 15
+            or not 1 <= pubkey_count <= 15
+            or threshold > pubkey_count
+        ):
+            raise ValueError
 
-    offset = 1
-    public_keys = []
-    for i in range(pubkey_count):
-        n, offset = read_op_push(script, offset)
-        if n != 33:
-            raise wire.DataError("Invalid multisig script")
-        public_keys.append(script[offset : offset + n])
-        offset += n
+        public_keys = []
+        for i in range(pubkey_count):
+            n = read_op_push(r)
+            if n != 33:
+                raise ValueError
+            public_keys.append(r.read(n))
 
-    if offset + 2 != len(script):
+        r.get()  # ignore pubkey_count
+        if r.get() != 0xAE:  # OP_CHECKMULTISIG
+            raise ValueError
+        if r.remaining_count():
+            raise ValueError
+
+    except (ValueError, IndexError):
         raise wire.DataError("Invalid multisig script")
 
     return public_keys, threshold
@@ -521,46 +534,3 @@ def append_signature(w: Writer, signature: bytes, hash_type: int) -> None:
 def append_pubkey(w: Writer, pubkey: bytes) -> None:
     write_op_push(w, len(pubkey))
     write_bytes_unchecked(w, pubkey)
-
-
-def read_bitcoin_varint(data: bytes, offset: int) -> Tuple[int, int]:
-    prefix = data[offset]
-    offset += 1
-    if prefix < 253:
-        n = prefix
-    elif prefix == 253:
-        n = data[offset]
-        n += data[offset + 1] << 8
-        offset += 2
-    elif prefix == 254:
-        n = data[offset]
-        n += data[offset + 1] << 8
-        n += data[offset + 2] << 16
-        n += data[offset + 3] << 24
-        offset += 4
-    else:
-        raise wire.DataError("Invalid VarInt")
-    return n, offset
-
-
-def read_op_push(data: bytes, offset: int) -> Tuple[int, int]:
-    prefix = data[offset]
-    offset += 1
-    if prefix < 0x4C:
-        n = prefix
-    elif prefix == 0x4C:
-        n = data[offset]
-        offset += 1
-    elif prefix == 0x4D:
-        n = data[offset]
-        n += data[offset + 1] << 8
-        offset += 2
-    elif prefix == 0x4E:
-        n = data[offset]
-        n += data[offset + 1] << 8
-        n += data[offset + 2] << 16
-        n += data[offset + 3] << 24
-        offset += 4
-    else:
-        raise wire.DataError("Invalid OP_PUSH")
-    return n, offset
