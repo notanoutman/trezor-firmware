@@ -289,7 +289,8 @@ class Bitcoin:
         if txi.witness:
             return self.hash143_preimage_hash(txi, public_keys, threshold)
         else:
-            return (await self.get_legacy_tx_digest(i, script_pubkey))[0]
+            digest, _, _ = await self.get_legacy_tx_digest(i, script_pubkey)
+            return digest
 
     def on_negative_fee(self) -> None:
         raise wire.NotEnoughFunds("Not enough funds")
@@ -669,7 +670,9 @@ def input_is_segwit(txi: TxInputType) -> bool:
 
 
 def input_is_nonsegwit(txi: TxInputType) -> bool:
-    return txi.script_type in common.NONSEGWIT_INPUT_SCRIPT_TYPES
+    return txi.script_type in common.NONSEGWIT_INPUT_SCRIPT_TYPES or (
+        txi.script_type == InputScriptType.EXTERNAL and txi.witness is None
+    )
 
 
 def input_is_external(txi: TxInputType) -> bool:
