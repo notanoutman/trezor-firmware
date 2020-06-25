@@ -60,8 +60,8 @@ class Bitcoinlike(Bitcoin):
         if not self.coin.negative_fee:
             super().on_negative_fee()
 
-    def get_sighash_type(self) -> int:
-        hashtype = super().get_sighash_type()
+    def get_sighash_type(self, txi: TxInputType) -> int:
+        hashtype = super().get_sighash_type(txi)
         if self.coin.fork_id is not None:
             hashtype |= (self.coin.fork_id << 8) | _SIGHASH_FORKID
         return hashtype
