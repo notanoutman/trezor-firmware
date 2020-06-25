@@ -85,10 +85,16 @@ class SignatureVerifier:
         if self.threshold != len(self.signatures):
             raise wire.DataError("Invalid signature")
 
-    def check_hash_type(self, hash_type: int) -> bool:
-        return all(h == hash_type for _, h in self.signatures)
+    def ensure_hash_type(self, hash_type: int) -> None:
+        if any(h != hash_type for _, h in self.signatures):
+            raise wire.DataError("Unsupported sighash type")
 
     def verify(self, digest: bytes) -> None:
+        # It is up to the caller to ensure that the digest is appropriate for
+        # the hash type used by the signatures. If a signature is using a
+        # different hash type than expected, then verification will fail. To
+        # return the proper error message, the caller can optionally check the
+        # hash type by using ensure_hash_type() before calling verify.
         try:
             i = 0
             for signature, _ in self.signatures:
