@@ -157,7 +157,7 @@ class Bitcoin:
         if self.tx.lock_time > 0:
             await helpers.confirm_nondefault_locktime(self.tx.lock_time)
         if not self.external:
-            await helpers.confirm_total(spending, fee, self.coin)
+            await helpers.confirm_total(total, fee, self.coin)
         else:
             await helpers.confirm_joint_total(spending, total, self.coin)
 
