@@ -185,8 +185,7 @@ class Bitcoin:
                     script_pubkey, txi.script_sig, txi.witness, self.coin
                 )
 
-                if not verifier.check_hash_type(self.get_hash_type()):
-                    raise wire.DataError("Unsupported sighash type")
+                verifier.ensure_hash_type(self.get_hash_type(txi))
 
                 tx_digest = await self.get_tx_digest(
                     i, txi, verifier.public_keys, verifier.threshold, script_pubkey
