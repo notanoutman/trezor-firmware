@@ -104,6 +104,7 @@ def verify_nonownership(
             if utils.consteq(ownership_id, r.read(_OWNERSHIP_ID_LEN)):
                 not_owned = False
 
+        # Verify the BIP-322 SignatureProof.
         proof_body = proof[: r.offset]
         script_sig = read_bytes_prefixed(r)
         witness = r.read()
@@ -111,6 +112,10 @@ def verify_nonownership(
         sighash = hashlib.sha256(proof_body)
         sighash.update(script_pubkey)
         sighash.update(commitment_data)
+
+        # We don't call verifier.ensure_hash_type() to avoid possible compatibility
+        # issues between implementations, because the hash type doesn't influence
+        # the digest and the value to use is not defined in BIP-322.
         verifier = SignatureVerifier(script_pubkey, script_sig, witness, coin)
         verifier.verify(sighash.digest())
     except (ValueError, IndexError):
